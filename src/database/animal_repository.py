@@ -5,7 +5,6 @@ from PostgreSQL with pgvector extension.
 """
 
 from typing import Optional
-from uuid import UUID
 
 from src.models.animal_document import AnimalDocument
 
@@ -68,11 +67,11 @@ class AnimalRepository:
         # TODO: Log batch insert statistics
         raise NotImplementedError("AnimalRepository.save_animals() not yet implemented")
 
-    def find_animal(self, animal_id: UUID) -> Optional[AnimalDocument]:
+    def find_animal(self, animal_id: int) -> Optional[AnimalDocument]:
         """Find a single AnimalDocument by its ID.
 
         Args:
-            animal_id: UUID of the animal to find.
+            animal_id: Integer ID (BIGSERIAL) of the animal to find.
 
         Returns:
             AnimalDocument if found, None otherwise.
