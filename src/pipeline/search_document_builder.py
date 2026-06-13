@@ -1,7 +1,7 @@
 """Search Document Builder Module.
 
 Responsible for composing the final searchable text document
-from the generated description and other enrichment sources.
+from the generated description and Wikipedia enrichment.
 """
 
 from src.models.animal_document import AnimalDocument
@@ -10,9 +10,8 @@ from src.models.animal_document import AnimalDocument
 class SearchDocumentBuilder:
     """Builds composite search documents for semantic search indexing.
 
-    For V1, the search_document is set directly from the generated description.
-    In future versions, this will combine description + wikipedia_summary
-    and potentially other enrichment sources.
+    Combines the generated description with the Wikipedia summary
+    (if available) into a unified search_document field.
     """
 
     def __init__(self) -> None:
@@ -22,7 +21,12 @@ class SearchDocumentBuilder:
     def build_search_document(self, document: AnimalDocument) -> str:
         """Build a search document for a single AnimalDocument.
 
-        For V1, the search_document equals the description field.
+        Combines description + Wikipedia summary if available.
+        Format:
+            {description}
+
+            Wikipedia Summary:
+            {wikipedia_summary}
 
         Args:
             document: AnimalDocument with populated description field.
@@ -38,9 +42,14 @@ class SearchDocumentBuilder:
                 f"Cannot build search document for '{document.name}': description is empty."
             )
 
-        # V1: search_document = description
-        # Future: combine description + wikipedia_summary + additional metadata
-        return document.description
+        # Start with description
+        search_doc = document.description
+
+        # Append Wikipedia summary if available
+        if document.wikipedia_summary and document.wikipedia_summary.strip():
+            search_doc += "\n\nWikipedia Summary:\n" + document.wikipedia_summary
+
+        return search_doc
 
     def build_search_documents(self, documents: list[AnimalDocument]) -> list[AnimalDocument]:
         """Build search documents for a batch of AnimalDocuments.

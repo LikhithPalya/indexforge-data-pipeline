@@ -1,10 +1,15 @@
 """Embedding Generator Module.
 
 Responsible for generating vector embeddings from search documents
-using sentence-transformer models.
+using the sentence-transformers library with all-MiniLM-L6-v2 model.
 """
 
+import logging
+from sentence_transformers import SentenceTransformer
+
 from src.models.animal_document import AnimalDocument
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingGenerator:
@@ -15,78 +20,81 @@ class EmbeddingGenerator:
     suitable for semantic similarity search.
     """
 
-    # TODO: Load sentence-transformers model
-    # TODO: Implement batch encoding for efficiency
-    # TODO: Add GPU support detection
-    # TODO: Add embedding dimension validation
+    EXPECTED_DIMENSION = 384
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", batch_size: int = 32) -> None:
-        """Initialize EmbeddingGenerator with model configuration.
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Initialize EmbeddingGenerator by loading the sentence-transformer model.
 
         Args:
             model_name: Name of the sentence-transformer model to use.
-            batch_size: Number of documents to encode in a single batch.
         """
-        # TODO: Load the sentence-transformers model
-        # TODO: Detect available device (CPU/GPU)
-        # TODO: Log model loading status
+        logger.info(f"Loading embedding model: {model_name}")
         self.model_name = model_name
-        self.batch_size = batch_size
+        self.model = SentenceTransformer(model_name)
+        logger.info(f"Model loaded successfully. Embedding dimension: {self.EXPECTED_DIMENSION}")
 
-    def generate_embedding(self, document: AnimalDocument) -> AnimalDocument:
-        """Generate an embedding for a single document's search_document field.
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate an embedding vector for a single text string.
 
         Args:
-            document: AnimalDocument with populated search_document field.
+            text: Text string to encode.
 
         Returns:
-            AnimalDocument with populated embedding field.
+            384-dimensional embedding vector as a list of floats.
 
         Raises:
-            ValueError: If search_document is None or empty.
+            ValueError: If text is None or empty.
+            ValueError: If generated embedding dimension does not match expected.
         """
-        # TODO: Validate search_document is not empty
-        # TODO: Encode search_document text
-        # TODO: Set document.embedding to resulting vector
-        raise NotImplementedError("EmbeddingGenerator.generate_embedding() not yet implemented")
+        if not text or text.strip() == "":
+            raise ValueError("Cannot generate embedding for empty text.")
 
-    def generate_embeddings(self, documents: list[AnimalDocument]) -> list[AnimalDocument]:
-        """Generate embeddings for a batch of documents.
+        embedding = self.model.encode(text).tolist()
+
+        if len(embedding) != self.EXPECTED_DIMENSION:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.EXPECTED_DIMENSION}, "
+                f"got {len(embedding)}"
+            )
+
+        return embedding
+
+    def generate_embeddings(self, animals: list[AnimalDocument]) -> list[AnimalDocument]:
+        """Generate embeddings for a list of AnimalDocument instances.
+
+        Encodes each animal's search_document field into a 384-dimensional
+        vector and stores it in the animal's embedding field.
 
         Args:
-            documents: List of AnimalDocument instances with populated search_document fields.
+            animals: List of AnimalDocument instances with populated search_document fields.
 
         Returns:
             List of AnimalDocument instances with populated embedding fields.
         """
-        # TODO: Extract search_document texts from all documents
-        # TODO: Batch encode using sentence-transformers
-        # TODO: Assign embeddings back to documents
-        # TODO: Log batch processing progress
-        raise NotImplementedError("EmbeddingGenerator.generate_embeddings() not yet implemented")
+        total = len(animals)
+        logger.info(f"Generating embeddings for {total} animals...")
+        processed = 0
+        skipped = 0
 
-    def _encode_texts(self, texts: list[str]) -> list[list[float]]:
-        """Encode a list of text strings into vector embeddings.
+        for i, animal in enumerate(animals, start=1):
+            # Validate search_document exists
+            if not animal.has_search_document():
+                logger.warning(f"Skipping '{animal.name}': no search_document available.")
+                skipped += 1
+                continue
 
-        Args:
-            texts: List of text strings to encode.
+            # Generate and store embedding
+            animal.embedding = self.generate_embedding(animal.search_document)
+            processed += 1
 
-        Returns:
-            List of embedding vectors (each 384-dimensional).
-        """
-        # TODO: Use model.encode() with batch_size
-        # TODO: Convert numpy arrays to Python lists
-        # TODO: Handle empty strings
-        raise NotImplementedError("EmbeddingGenerator._encode_texts() not yet implemented")
+            # Log progress every 25 animals
+            if i % 25 == 0:
+                logger.info(f"  Progress: {i}/{total} animals processed")
 
-    def _validate_embedding_dimension(self, embedding: list[float]) -> bool:
-        """Validate that an embedding has the expected dimensionality.
+        logger.info(
+            f"Embedding generation complete. "
+            f"Processed: {processed}, Skipped: {skipped}, "
+            f"Dimension: {self.EXPECTED_DIMENSION}"
+        )
 
-        Args:
-            embedding: Vector embedding to validate.
-
-        Returns:
-            True if embedding has correct dimensions, False otherwise.
-        """
-        # TODO: Check embedding length matches expected dimension (384)
-        raise NotImplementedError("EmbeddingGenerator._validate_embedding_dimension() not yet implemented")
+        return animals

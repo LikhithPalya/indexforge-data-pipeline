@@ -46,6 +46,7 @@ class SearchDocumentExporter:
             record = {
                 "name": doc.name,
                 "description": doc.description,
+                "wikipedia_summary": doc.wikipedia_summary,
                 "search_document": doc.search_document,
                 "conservation_status": doc.conservation_status,
                 "habitat": doc.habitat,
