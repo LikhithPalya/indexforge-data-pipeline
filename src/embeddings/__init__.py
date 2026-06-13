@@ -1,0 +1,1 @@
+"""Embeddings package for IndexForge Data Pipeline."""

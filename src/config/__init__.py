@@ -1,0 +1,1 @@
+"""Configuration package for IndexForge Data Pipeline."""
