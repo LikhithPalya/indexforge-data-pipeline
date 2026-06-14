@@ -1,106 +1,179 @@
 """Animal Repository Module.
 
-Responsible for persisting and retrieving AnimalDocument instances
-from PostgreSQL with pgvector extension.
+Responsible for persisting AnimalDocument instances
+to PostgreSQL with pgvector extension using psycopg2.
 """
 
+import logging
 from typing import Optional
 
+import psycopg2
+import psycopg2.extras
+
+from src.config.settings import Settings
 from src.models.animal_document import AnimalDocument
+
+logger = logging.getLogger(__name__)
 
 
 class AnimalRepository:
     """Repository layer for AnimalDocument persistence.
 
-    Manages CRUD operations against PostgreSQL with pgvector,
-    including connection pooling, transaction management,
-    and batch insert operations.
+    Manages insert operations against PostgreSQL with pgvector,
+    using psycopg2 for database connectivity.
     """
 
-    # TODO: Set up SQLAlchemy engine and session factory
-    # TODO: Define ORM table mapping for animals table
-    # TODO: Add connection pooling configuration
-    # TODO: Add transaction management
-
-    def __init__(self, database_url: str = "") -> None:
-        """Initialize AnimalRepository with database connection.
+    def __init__(self, settings: Settings) -> None:
+        """Initialize AnimalRepository with database connection settings.
 
         Args:
-            database_url: PostgreSQL connection string.
+            settings: Application settings containing database configuration.
         """
-        # TODO: Create SQLAlchemy engine from database_url
-        # TODO: Create session factory
-        # TODO: Verify database connectivity
-        self.database_url = database_url
+        self.settings = settings
+        self._connection = None
 
-    def save_animal(self, document: AnimalDocument) -> AnimalDocument:
+    def _get_connection(self):
+        """Get or create a database connection.
+
+        Returns:
+            psycopg2 connection object.
+        """
+        if self._connection is None or self._connection.closed:
+            self._connection = psycopg2.connect(
+                host=self.settings.database_host,
+                port=self.settings.database_port,
+                dbname=self.settings.database_name,
+                user=self.settings.database_user,
+                password=self.settings.database_password,
+            )
+        return self._connection
+
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._connection and not self._connection.closed:
+            self._connection.close()
+            logger.info("Database connection closed.")
+
+    def truncate(self) -> None:
+        """Truncate the animals table and restart identity sequence.
+
+        This is acceptable for V1 to ensure clean re-runs.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("TRUNCATE TABLE animals RESTART IDENTITY;")
+            conn.commit()
+            logger.info("Truncated animals table.")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to truncate animals table: {e}")
+            raise
+
+    def save_animal(self, animal: AnimalDocument) -> None:
         """Save a single AnimalDocument to the database.
 
         Args:
-            document: AnimalDocument to persist.
-
-        Returns:
-            Persisted AnimalDocument with generated id and created_at.
+            animal: AnimalDocument to persist.
 
         Raises:
-            DatabaseError: If the write operation fails.
+            Exception: If the insert operation fails.
         """
-        # TODO: Map AnimalDocument to ORM model
-        # TODO: Insert into database within a transaction
-        # TODO: Return document with generated fields populated
-        raise NotImplementedError("AnimalRepository.save_animal() not yet implemented")
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO animals (
+                        name, description, wikipedia_summary, search_document,
+                        habitat, diet, family, conservation_status,
+                        embedding
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        animal.name,
+                        animal.description,
+                        animal.wikipedia_summary,
+                        animal.search_document,
+                        animal.habitat,
+                        animal.diet,
+                        animal.family,
+                        animal.conservation_status,
+                        self._format_embedding(animal.embedding),
+                    ),
+                )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to save animal '{animal.name}': {e}")
+            raise
 
-    def save_animals(self, documents: list[AnimalDocument]) -> list[AnimalDocument]:
+    def save_animals(self, animals: list[AnimalDocument]) -> int:
         """Save a batch of AnimalDocuments to the database.
 
+        Commits only after successful batch insert.
+        Rolls back on any failure.
+
         Args:
-            documents: List of AnimalDocument instances to persist.
+            animals: List of AnimalDocument instances to persist.
 
         Returns:
-            List of persisted AnimalDocument instances.
+            Number of animals successfully inserted.
 
         Raises:
-            DatabaseError: If the batch write operation fails.
+            Exception: If the batch insert operation fails.
         """
-        # TODO: Batch insert using SQLAlchemy bulk operations
-        # TODO: Handle partial failures (all-or-nothing vs. skip-failed)
-        # TODO: Log batch insert statistics
-        raise NotImplementedError("AnimalRepository.save_animals() not yet implemented")
+        conn = self._get_connection()
+        inserted_count = 0
 
-    def find_animal(self, animal_id: int) -> Optional[AnimalDocument]:
-        """Find a single AnimalDocument by its ID.
+        try:
+            with conn.cursor() as cursor:
+                for animal in animals:
+                    cursor.execute(
+                        """
+                        INSERT INTO animals (
+                            name, description, wikipedia_summary, search_document,
+                            habitat, diet, family, conservation_status,
+                            embedding
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            animal.name,
+                            animal.description,
+                            animal.wikipedia_summary,
+                            animal.search_document,
+                            animal.habitat,
+                            animal.diet,
+                            animal.family,
+                            animal.conservation_status,
+                            self._format_embedding(animal.embedding),
+                        ),
+                    )
+                    inserted_count += 1
+
+            conn.commit()
+            logger.info(f"Successfully persisted {inserted_count} animals to PostgreSQL.")
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Batch insert failed after {inserted_count} records: {e}")
+            raise
+
+        return inserted_count
+
+    def _format_embedding(self, embedding: Optional[list[float]]) -> Optional[str]:
+        """Convert Python embedding list to pgvector format string.
+
+        Converts [0.12, -0.45, 0.89] to '[0.12,-0.45,0.89]'
 
         Args:
-            animal_id: Integer ID (BIGSERIAL) of the animal to find.
+            embedding: List of float values or None.
 
         Returns:
-            AnimalDocument if found, None otherwise.
+            pgvector-compatible string representation or None.
         """
-        # TODO: Query database by primary key
-        # TODO: Map ORM model back to AnimalDocument
-        raise NotImplementedError("AnimalRepository.find_animal() not yet implemented")
+        if embedding is None:
+            return None
 
-    def find_by_name(self, name: str) -> Optional[AnimalDocument]:
-        """Find a single AnimalDocument by animal name.
-
-        Args:
-            name: Name of the animal to search for.
-
-        Returns:
-            AnimalDocument if found, None otherwise.
-        """
-        # TODO: Query database by name (case-insensitive)
-        # TODO: Map ORM model back to AnimalDocument
-        raise NotImplementedError("AnimalRepository.find_by_name() not yet implemented")
-
-    def exists(self, name: str) -> bool:
-        """Check if an animal with the given name already exists.
-
-        Args:
-            name: Name of the animal to check.
-
-        Returns:
-            True if the animal exists, False otherwise.
-        """
-        # TODO: Perform existence check query
-        raise NotImplementedError("AnimalRepository.exists() not yet implemented")
+        values = ",".join(str(v) for v in embedding)
+        return f"[{values}]"

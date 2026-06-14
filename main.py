@@ -2,8 +2,8 @@
 
 Loads a CSV file from data/raw/, cleans the records,
 generates descriptions, enriches with Wikipedia, builds search documents,
-exports to JSON, generates embeddings, validates embeddings, and runs
-retrieval evaluation.
+generates embeddings, validates embeddings, persists to PostgreSQL,
+and runs retrieval evaluation.
 """
 
 import logging
@@ -21,6 +21,8 @@ from src.pipeline.search_document_builder import SearchDocumentBuilder
 from src.export.search_document_exporter import SearchDocumentExporter
 from src.embeddings.embedding_generator import EmbeddingGenerator
 from src.validation.embedding_validator import EmbeddingValidator
+from src.database.animal_repository import AnimalRepository
+from src.config.settings import Settings
 from src.embeddings.similarity_tester import SimilarityTester
 
 # Configure logging
@@ -81,22 +83,16 @@ def main() -> None:
     docs_with_search = sum(1 for d in final_documents if d.search_document)
     print(f"  → Built {docs_with_search} search documents")
 
-    # Stage 6: Export to JSON
-    print("\n[Stage 6] Exporting search documents...")
-    exporter = SearchDocumentExporter(output_path=output_path)
-    exported_count = exporter.export(final_documents)
-    print(f"  → Exported {exported_count} search documents to {output_path}")
-
-    # Stage 7: Embedding Generation
-    print("\n[Stage 7] Generating embeddings...")
+    # Stage 6: Generating Embeddings
+    print("\n[Stage 6] Generating embeddings...")
     embedding_generator = EmbeddingGenerator(model_name="all-MiniLM-L6-v2")
     embedded_documents = embedding_generator.generate_embeddings(final_documents)
     docs_with_embedding = sum(1 for d in embedded_documents if d.has_embedding())
     print(f"  → Generated {docs_with_embedding} embeddings")
     print(f"  → Embedding dimension: {EmbeddingGenerator.EXPECTED_DIMENSION}")
 
-    # Stage 8: Embedding Validation (quality gate)
-    print("\n[Stage 8] Embedding Validation...")
+    # Stage 7: Embedding Validation (quality gate)
+    print("\n[Stage 7] Embedding Validation...")
     validator = EmbeddingValidator()
     report = validator.validate(embedded_documents)
     validator.print_report(report)
@@ -105,6 +101,24 @@ def main() -> None:
     if report.invalid_embeddings > 0:
         print("\n❌ Pipeline STOPPED: Fix invalid embeddings before database ingestion.")
         sys.exit(1)
+
+    # Stage 8: Persist to PostgreSQL
+    print("\n[Stage 8] Persisting to PostgreSQL...")
+    try:
+        settings = Settings()
+        repository = AnimalRepository(settings=settings)
+
+        # Truncate existing data for clean re-run
+        repository.truncate()
+
+        # Batch insert all animals
+        inserted_count = repository.save_animals(embedded_documents)
+        print(f"  → Persisted {inserted_count} animals to PostgreSQL")
+
+        repository.close()
+    except Exception as e:
+        print(f"  ⚠️  Database persistence failed: {e}")
+        print(f"  Continuing pipeline without database persistence...")
 
     # Stage 9: Retrieval Evaluation
     print("\n[Stage 9] Running retrieval evaluation...")
